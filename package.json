@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,magenta \"tsx watch server/index.ts\" \"vite\"",
     "build": "tsc --noEmit && vite build",
@@ -22,7 +24,8 @@
     "helmet": "^8.1.0",
     "lucide-react": "^0.577.0",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/compression": "^1.8.1",
@@ -31,6 +34,7 @@
     "@types/node": "^24.10.13",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@types/web-push": "^3.6.4",
     "@vitejs/plugin-react": "^5.1.4",
     "concurrently": "^9.2.1",
     "tsx": "^4.21.0",

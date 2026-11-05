@@ -14,6 +14,7 @@ export interface DailyBriefing {
   forDate: string;           // 简报面向的日期（今天）
   generatedAt: string;
   source: 'ai' | 'rules';
+  dataSource?: DashboardData['source']; // Absent in older saved briefings; don't push those automatically.
   model: string | null;
   headline: string;
   summary: string;
@@ -146,7 +147,7 @@ function pmcLatest(pmcRows: Array<{ date: string; ctl: number; atl: number; tsb:
 
 // 由外部注入的数据获取器
 export interface BriefingPmcRow { date: string; ctl: number; atl: number; tsb: number }
-export type BriefingDataFetcher = () => Promise<{
+export type BriefingDataFetcher = (date: string) => Promise<{
   day: DashboardData; trends: DashboardExtended | null; pmcRows: BriefingPmcRow[] | null;
 }>;
 
@@ -158,9 +159,13 @@ export async function generateBriefing(date: string, fetcher: BriefingDataFetche
   if (existing && !force) return existing;
 
   let data: Awaited<ReturnType<BriefingDataFetcher>>;
-  try { data = await fetcher(); }
+  try { data = await fetcher(date); }
   catch (e) { throw new Error(`获取 Garmin 数据失败：${e instanceof Error ? e.message : '未知错误'}`); }
   const { day, trends, pmcRows } = data;
+  if (day.source === 'garmin' && [day.hrv.lastNight, day.restingHeartRate, day.sleep.hours, day.activity.steps,
+    day.bodyBattery, day.stress.average, day.spo2.latest].every(x => x === null)) {
+    throw new Error('该日没有足够的 Garmin 读数，暂不生成或推送简报。');
+  }
   const pmc = pmcLatest(pmcRows);
 
   let briefing: DailyBriefing;
@@ -171,10 +176,17 @@ export async function generateBriefing(date: string, fetcher: BriefingDataFetche
     briefing.error = `AI 生成失败，已用本地规则简报：${e instanceof Error ? e.message : '未知错误'}`;
   }
 
+  briefing.dataSource = day.source;
   store.history = [briefing, ...store.history.filter(b => !(b.forDate === briefing.forDate && b.date === briefing.date))].slice(0, MAX_HISTORY);
   await writeStore(store);
   lastGeneratedFor = briefing.forDate;
   return briefing;
+}
+
+export async function phoneBriefingDate(): Promise<string|null> {
+  const store = await readStore();
+  if (!store.config.enabled || !store.config.browserNotify) return null;
+  return store.history.find(b => b.forDate === today() && b.date === yesterday() && b.dataSource === 'garmin')?.forDate ?? null;
 }
 
 export function registerBriefingRouter(app: express.Express, fetcher: BriefingDataFetcher) {

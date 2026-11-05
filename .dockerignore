@@ -1,0 +1,18 @@
+# Send only build inputs; .env, .git, personal history and runtime stores stay on the host.
+**
+!package.json
+!package-lock.json
+!tsconfig.json
+!vite.config.ts
+!index.html
+!public/
+!public/**
+!src/
+!src/**
+!server/
+!server/**
+!scripts/
+!scripts/install-hooks.mjs
+**/*.sqlite
+**/*.sqlite-*
+**/.env*

@@ -20,7 +20,7 @@ const SECRET_FILES = [
   '.token-cache.json', '.server.log',
 ];
 // 2) 会被提交的代码/配置里不能出现这些"值"（取自本地真实文件，只用于比对，不输出）
-const SENSITIVE_ENV_KEYS = ['GARMIN_API_KEY', 'AI_API_KEY', 'GARMIN_PASSWORD', 'GARMIN_USERNAME', 'SESSION_SECRET', 'DASHBOARD_PASSWORD'];
+const SENSITIVE_ENV_KEYS = ['GARMIN_API_KEY', 'AI_API_KEY', 'GARMIN_PASSWORD', 'GARMIN_USERNAME', 'SESSION_SECRET', 'DASHBOARD_PASSWORD', 'WEB_PUSH_PRIVATE_KEY'];
 const realValues = [];
 function collectFromEnv(file) {
   if (!existsSync(file)) return;
@@ -66,6 +66,7 @@ function walk(dir, out = []) {
     if (e.isDirectory()) { walk(full, out); continue; }
     if (!e.isFile()) continue;
     if (SECRET_FILES.includes(rel)) continue;                 // 兜底：本身就不该被提交
+    if (/\.sqlite(?:-.*)?$/i.test(rel)) continue;             // 不读健康库的二进制内容；下方查 Git 索引
     if (rel.endsWith('.png') || rel.endsWith('.jpg') || rel.endsWith('.jpeg') || rel.endsWith('.ttf') || rel.endsWith('.woff2')) continue;
     if (rel.endsWith('.apk') || rel.endsWith('.ipa')) continue;
     out.push(rel);
@@ -81,6 +82,11 @@ try {
   let isGitRepo = true;
   try { execFileSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: ROOT, stdio: 'ignore' }); }
   catch { isGitRepo = false; }
+
+  if (isGitRepo) {
+    const tracked = execFileSync('git', ['ls-files', '-z', '--', '*.sqlite', '*.sqlite-*'], { cwd: ROOT, encoding: 'utf8' });
+    for (const file of tracked.split('\0').filter(Boolean)) findings.push({ file, type: '已被 Git 跟踪的私密 SQLite 文件', line: null });
+  }
 
   let ignoreText = '';
   if (existsSync(p('.gitignore'))) ignoreText = readFileSync(p('.gitignore'), 'utf8');
