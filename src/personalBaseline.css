@@ -1,0 +1,13 @@
+.personal-panel { margin: 16px 0; padding: 20px; }
+.personal-head, .personal-metric > div { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+.personal-head h2 { margin:0; font-size:1.1rem; }
+.personal-panel p, .personal-panel details { margin:6px 0; font-size:.86rem; line-height:1.6; }
+.personal-panel button { border:1px solid #d1c9bd; border-radius:8px; background:#fff; color:#39342e; padding:7px 11px; cursor:pointer; }
+.personal-panel button:disabled { opacity:.55; }
+.personal-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin:12px 0; }
+.personal-metric { border:1px solid #e4dfd7; background:#faf8f5; border-radius:12px; padding:12px 15px; }
+.personal-metric strong { font-size:1.6rem; }
+.personal-metric small { font-size:.75rem; color:#655e54; }
+.personal-metric p { color:#5c5853; }
+.personal-panel summary { cursor:pointer; }
+@media (max-width:560px) { .personal-grid {grid-template-columns:1fr;} }

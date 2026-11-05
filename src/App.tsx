@@ -7,6 +7,7 @@ import { makeSummary } from './summary';
 import { TrainingLoadPage } from './TrainingLoad';
 import { ChatPage } from './ChatPage';
 import { BriefingPanel, type DailyBriefing } from './BriefingPanel';
+import { PersonalBaseline } from './PersonalBaseline';
 
 const dateString = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 const unit = (value: number | null, suffix: string) => value === null ? '' : suffix;
@@ -164,6 +165,7 @@ export default function App() {
         <Timeline data={data}/>
         <article className="panel insights-panel"><div className="panel-title"><h2>近期洞察</h2><ArrowUpRight size={19}/></div><div className="insights-list">{data?.insights.length ? data.insights.map((item, i) => <InsightRow item={item} key={`${item.title}-${i}`}/>) : <Empty text="获得数据后，这里会生成你的健康洞察"/>}</div></article>
       </section>
+      <PersonalBaseline key={date} date={date} version={data?.date === date ? data.updatedAt : ''}/>
       {extraOpen && <div className="metrics-grid extra-metrics bottom-extra">
         {visible.calories && <MetricCard title="卡路里" className="calories-card" onOpen={() => openDetail('calories')}><div className="metric-value"><Value value={data?.calories?.total ?? null}/></div><p className="metric-sub">kcal · 今日总消耗</p><div className="cal-split"><span>基础 {(data?.calories?.resting ?? 0).toLocaleString()}</span><span>活动 {(data?.calories?.active ?? 0).toLocaleString()}</span></div><div className="cal-bars"><span style={{ flex: data?.calories?.resting ?? 1 }}/><span style={{ flex: data?.calories?.active ?? 0.3 }}/></div><div className="card-footer"><span>点右上角箭头看 7/30 天趋势</span></div></MetricCard>}
         {visible.heart && <MetricCard title="心率" className="heart-card" onOpen={() => openDetail('heart')}><div className="metric-value"><Value value={data?.restingHeartRate ?? null}/></div><p className="metric-sub">bpm · 静息心率</p><div className="hr-mini"><div><span>最高</span><b>{data?.heartRateMax ?? '—'}</b></div><div><span>近7日均</span><b>{data?.restingHeartRate ?? '—'}</b></div></div><div className="card-footer"><span>点右上角箭头看 7/30 天趋势</span></div></MetricCard>}
