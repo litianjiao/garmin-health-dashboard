@@ -10,4 +10,6 @@
 .personal-metric small { font-size:.75rem; color:#655e54; }
 .personal-metric p { color:#5c5853; }
 .personal-panel summary { cursor:pointer; }
+.habit-log button { margin-right:6px; }
+.habit-log [aria-pressed=true] { background:#343b33; color:#fff; }
 @media (max-width:560px) { .personal-grid {grid-template-columns:1fr;} }

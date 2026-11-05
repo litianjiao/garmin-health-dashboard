@@ -3,7 +3,7 @@ import { closeSync, mkdirSync, openSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Express } from 'express';
-import { isHistoryDate, offsetDate, type HistoryDay, type HistoryView } from '../src/personalHistory';
+import { isHistoryDate, offsetDate, type HabitDay, type HistoryDay, type HistoryView } from '../src/personalHistory';
 import type { DashboardData } from '../src/types';
 
 const positive = (n: number | null) => n !== null && Number.isFinite(n) && n > 0 ? n : null;
@@ -13,6 +13,7 @@ export class HealthHistory {
     db.exec(`CREATE TABLE IF NOT EXISTS daily_metrics (
       date TEXT PRIMARY KEY, hrv REAL, restingHeartRate REAL
     ) STRICT`);
+    db.exec('CREATE TABLE IF NOT EXISTS habit_log (date TEXT PRIMARY KEY, lateCaffeine INTEGER NOT NULL CHECK(lateCaffeine IN (0,1))) STRICT');
   }
   recordDay(data: DashboardData) {
     if (data.source === 'garmin') this.upsert([{ date: data.date, hrv: data.hrv.lastNight, restingHeartRate: data.restingHeartRate }]);
@@ -36,6 +37,15 @@ export class HealthHistory {
   read(from: string, to: string): HistoryDay[] {
     return this.db.prepare('SELECT date, hrv, restingHeartRate FROM daily_metrics WHERE date BETWEEN ? AND ? ORDER BY date')
       .all(from, to).map(r => ({ date: String(r.date), hrv: r.hrv as number | null, restingHeartRate: r.restingHeartRate as number | null }));
+  }
+  recordHabit(date:string, flag:boolean|null) {
+    if (flag === null) this.db.prepare('DELETE FROM habit_log WHERE date=?').run(date);
+    else this.db.prepare('INSERT INTO habit_log(date,lateCaffeine) VALUES(?,?) ON CONFLICT(date) DO UPDATE SET lateCaffeine=excluded.lateCaffeine')
+      .run(date, flag ? 1 : 0);
+  }
+  readHabits(from:string, to:string): HabitDay[] {
+    return this.db.prepare('SELECT date,lateCaffeine FROM habit_log WHERE date BETWEEN ? AND ? ORDER BY date')
+      .all(from,to).map(r => ({date:String(r.date), lateCaffeine:r.lateCaffeine===1}));
   }
   close() { this.db.close(); }
 }
@@ -61,8 +71,16 @@ export function registerHistoryRouter(app: Express, store: HealthHistory | null,
     const date = req.query.date;
     if (!isHistoryDate(date)) return res.status(400).json({ error: '请选择有效的日历日期' });
     const view: HistoryView = { status: store ? 'ready' : optIn ? 'no-source' : 'off', date,
-      canSync: Boolean(store && fetchRange), days: store?.read(offsetDate(date, -89), date) ?? [], warning: warning() };
+      canSync: Boolean(store && fetchRange), days: store?.read(offsetDate(date, -89), date) ?? [],
+      habits: store?.readHabits(offsetDate(date,-56),date) ?? [], warning: warning() };
     res.set('Cache-Control', 'no-store').json(view);
+  });
+  app.put('/api/history/habits/:date', (req,res) => {
+    const date = req.params.date, flag = req.body?.lateCaffeine;
+    if (!isHistoryDate(date) || (flag !== null && typeof flag !== 'boolean')) return res.status(400).json({error:'请选择有效日期，并明确指定有 / 无 / 未记录'});
+    if (!store) return res.status(409).json({error:'请先开启本机真实数据历史'});
+    try { store.recordHabit(date,flag); res.sendStatus(204); }
+    catch { res.status(503).json({error:'习惯记录未保存，请检查本机存储'}); }
   });
   app.post('/api/history/sync', async (req, res) => {
     const date = req.body?.date;

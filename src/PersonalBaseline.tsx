@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { compareMetric, dailyHint, MIN_DAYS, WINDOW_DAYS, type Comparison } from './baseline';
 import type { HistoryView } from './personalHistory';
 import './personalBaseline.css';
+import { HabitLog } from './HabitLog';
 
 const stateText = { missing: '当天未记录', learning: '积累中', below: '低于近期区间', within: '在近期区间内', above: '高于近期区间' };
 const format = (n: number | null) => n === null ? '—' : n.toLocaleString('zh-CN', { maximumFractionDigits: 1 });
@@ -48,6 +49,7 @@ export function PersonalBaseline({date, version}: {date:string; version:string})
       <div className="personal-grid"><Metric title="夜间 HRV" unit="ms" v={hrv}/><Metric title="静息心率" unit="bpm" v={rhr}/></div>
       <p className="personal-hint"><b>当日提示：</b>{dailyHint(hrv,rhr)}</p>
       <details><summary>区间怎么算？</summary><p>取所选日之前 {WINDOW_DAYS} 个日历日，不含当天。每项至少 {MIN_DAYS} 个有效日后才计算中位数和第 10–90 百分位。区间只描述个人近期记录，不是医学正常值，也不是 Garmin 官方 HRV 状态。</p></details>
+      <HabitLog view={view} onChange={()=>setReload(i=>i+1)}/>
     </>}
     {view?.warning && <p role="alert">{view.warning}</p>}{message && <p role="status">{message}</p>}
   </section>;
