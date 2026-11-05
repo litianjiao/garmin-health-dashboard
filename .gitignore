@@ -20,6 +20,9 @@ secrets.*
 credentials.*
 
 # ===== 运行时自动生成的敏感/状态文件 =====
+.health-history/
+*.sqlite
+*.sqlite-*
 # 官方 API 换取到的 access token
 .garmin-token.json
 # 本机手动记录的体重/体脂
