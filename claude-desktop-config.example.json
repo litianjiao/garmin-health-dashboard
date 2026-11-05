@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "garmin-connect": {
+      "command": "cmd",
+      "args": ["/c", "garmin-connect-mcp"],
+      "env": {
+        "GARMIN_USERNAME": "litiantroy@gmail.com",
+        "GARMIN_PASSWORD": "Ltj94815"
+      }
+    }
+  }
+}

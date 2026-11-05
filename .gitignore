@@ -1,0 +1,76 @@
+# ===== 依赖与构建产物 =====
+node_modules/
+dist/
+.vite/
+coverage/
+
+# ===== 环境变量与密钥（最重要）=====
+# 真实配置：本地保存，绝不提交
+.env
+.env.*
+!.env.example
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+api_key.txt
+secrets.*
+credentials.*
+
+# ===== 运行时自动生成的敏感/状态文件 =====
+# 官方 API 换取到的 access token
+.garmin-token.json
+# 本机手动记录的体重/体脂
+.local-metrics.json
+# AI 模型管理配置
+.ai-models.json
+# 每日简报与历史（含健康数据）
+.briefings.json
+# MCP / 会话缓存
+.garmin-session/
+.token-cache.json
+.field-samples.txt
+.swagger-found.json
+.swagger-component.js
+.openapi-spec.json
+.endpoint-list.txt
+.endpoint-descriptions.txt
+.extract-spec.mjs
+.gen-summary.mts
+.gen2.mts
+.gen3.mts
+.dash-check.json
+.pmc.json
+.pmc2.json
+.trend-check.json
+.bf.json
+.bf2.json
+.f.json
+.f2.json
+.f3.json
+.f4.json
+.m.json
+.m2.json
+.b.json
+.h.json
+.tl.json
+.server.log
+*.log
+
+# ===== 逆向分析样本（体积大 / 第三方版权）=====
+REA_BIN/
+*.apk
+*.ipa
+*.app/
+*.dmg
+
+# ===== 编辑器 / 系统 =====
+.vscode/
+.idea/
+.zcode/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

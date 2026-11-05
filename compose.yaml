@@ -1,0 +1,12 @@
+services:
+  dashboard:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 8787
+    # 只绑定本机；公网访问通过带 HTTPS 的 Tunnel 或反向代理。
+    ports:
+      - "127.0.0.1:8787:8787"
