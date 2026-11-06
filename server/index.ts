@@ -10,6 +10,7 @@ import { GarminMcp } from './garmin';
 import { GarminOfficialApi } from './garminOfficial';
 import { demoData } from '../src/demo';
 import { demoTrends } from '../src/demoTrends';
+import { openHealthHistory, registerHistoryRouter } from './history';
 import { PmcService } from './pmc';
 import { registerAiRouter } from './ai';
 import { registerAiModelRouter } from './aiModels';
@@ -20,7 +21,9 @@ import { execFile } from 'node:child_process';
 const app = express();
 const port = Number(process.env.PORT || 8787);
 const host = process.env.HOST || '127.0.0.1';
-const official = new GarminOfficialApi();
+const historyDir = (process.env.HEALTH_HISTORY_DIR || '').trim();
+// With history enabled, the collector keeps its bearer only in this account's process.
+const official = new GarminOfficialApi(!historyDir);
 const pmc = new PmcService(official);
 const garmin = new GarminMcp();
 const useMcp = process.env.GARMIN_TRANSPORT === 'mcp';
@@ -83,6 +86,17 @@ app.post('/api/session', rateLimit({ windowMs: 60_000, limit: 10, standardHeader
   res.json({ authenticated: true });
 });
 app.delete('/api/session', (_req, res) => { res.clearCookie('moru_session', { path: '/' }); res.json({ authenticated: false }); });
+const historyAccount = useMcp
+  ? (process.env.GARMIN_USERNAME && process.env.GARMIN_PASSWORD ? `mcp:${process.env.GARMIN_USERNAME.trim().toLowerCase()}` : null)
+  : (official.configured ? `official:${process.env.GARMIN_API_KEY!.trim()}` : null);
+if (historyDir && ((!password && !['localhost','127.0.0.1','::1'].includes(host)) || (password && !process.env.SESSION_SECRET?.trim()))) {
+  throw new Error('网络模式下启用本地历史需同时设置 DASHBOARD_PASSWORD 和 SESSION_SECRET');
+}
+const history = await openHealthHistory(historyDir, historyAccount);
+let historyWarning: string | undefined;
+registerHistoryRouter(app, history, Boolean(historyDir), official.configured && !useMcp ? date => official.personalHistory(date) : null, () => historyWarning);
+if (history) process.once('exit', () => history.close());
+
 app.get('/api/config', (_req, res) => res.json({ configured, demo: !configured, authEnabled: Boolean(password) }));
 app.get('/api/trends', async (req, res) => {
   const requested = typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10);
@@ -133,6 +147,10 @@ app.get('/api/dashboard', async (req, res) => {
     const data = useDemo ? demoData(requested)
       : useMcp ? await garmin.dashboard(requested)
       : await official.dashboard(requested, locals);
+    if (history) {
+      try { history.recordDay(data); historyWarning = undefined; }
+      catch { historyWarning = '本次数据未写入本地历史；请检查目录权限与剩余空间。'; }
+    }
     cache.set(key, { time: Date.now(), data });
     res.json(data);
   } catch (error) {

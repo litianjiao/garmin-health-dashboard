@@ -1,4 +1,5 @@
 import type { DashboardData, DashboardExtended, DayDetail, ActivitySummary } from '../src/types';
+import { isHistoryDate, offsetDate, type HistoryDay } from '../src/personalHistory';
 import { join } from 'node:path';
 import { readFile, writeFile } from 'node:fs/promises';
 
@@ -27,7 +28,7 @@ export class GarminOfficialApi {
   private token = '';
   private tokenTime = 0;
 
-  constructor() {
+  constructor(private readonly persistToken = true) {
     this.apiKey = (process.env.GARMIN_API_KEY || '').trim();
   }
 
@@ -36,7 +37,9 @@ export class GarminOfficialApi {
   private async ensureToken(): Promise<string> {
     if (this.token && Date.now() - this.tokenTime < TOKEN_TTL_MS) return this.token;
     let cached: { token?: string; time?: number } = {};
-    try { cached = JSON.parse(await readFile(TOKEN_PATH, 'utf8')); } catch { /* first run */ }
+    if (this.persistToken) {
+      try { cached = JSON.parse(await readFile(TOKEN_PATH, 'utf8')); } catch { /* first run */ }
+    }
     if (cached.token && cached.time && Date.now() - cached.time < TOKEN_TTL_MS) {
       this.token = cached.token; this.tokenTime = cached.time;
       return this.token;
@@ -53,7 +56,7 @@ export class GarminOfficialApi {
     }
     this.token = (await res.text()).trim();
     this.tokenTime = Date.now();
-    await writeFile(TOKEN_PATH, JSON.stringify({ token: this.token, time: this.tokenTime }), { mode: 0o600 }).catch(() => undefined);
+    if (this.persistToken) await writeFile(TOKEN_PATH, JSON.stringify({ token: this.token, time: this.tokenTime }), { mode: 0o600 }).catch(() => undefined);
     return this.token;
   }
 
@@ -107,6 +110,32 @@ export class GarminOfficialApi {
 
   async getActivityDetail(id: number): Promise<Json> {
     return this.get<Json>(`/activity-service/activity/${id}`).catch(() => ({}) as Json);
+  }
+
+  // Two range requests for a 30-day backfill, not 30 full dashboard fetches.
+  async personalHistory(end: string): Promise<HistoryDay[]> {
+    const from = offsetDate(end, -29);
+    await this.ensureToken(); // authenticate once before issuing concurrent range requests
+    const [hrv, summaries] = await Promise.all([
+      this.get<Json>(`/hrv-service/hrv/daily/${from}/${end}`),
+      this.get<Json>(`/usersummary-service/v2/dailysummaries?startDate=${from}&endDate=${end}`),
+    ]);
+    const days = new Map<string, HistoryDay>();
+    const row = (date: unknown) => {
+      if (!isHistoryDate(date) || date < from || date > end) return;
+      if (!days.has(date)) days.set(date, { date, hrv: null, restingHeartRate: null });
+      return days.get(date)!;
+    };
+    for (const raw of asArray(hrv.hrvSummaries)) {
+      const item = asObject(raw), day = row(item.calendarDate);
+      if (day && num(item.lastNightAvg) !== null) day.hrv = num(item.lastNightAvg);
+    }
+    for (const raw of asArray(summaries.data)) {
+      const item = asObject(raw), day = row(item.calendarDate);
+      const rhr = num(asObject(item.heartRate).restingValue);
+      if (day && rhr !== null) day.restingHeartRate = rhr;
+    }
+    return [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
   }
 
   async extended(date: string, range: 7 | 30 = 7): Promise<DashboardExtended> {
@@ -261,6 +290,7 @@ export class GarminOfficialApi {
   }
 
   async dashboard(date: string, localEntries: Array<{ date: string; bodyFat?: number; weightKg?: number }> = []): Promise<DashboardData> {
+    if (!this.persistToken) await this.ensureToken();
     const from = this.daysAgo(date, 7);
     const [summaryRaw, sleepRaw, heartRaw, hrvRaw, hrvWeekRaw, fitnessRaw, stepsWeekRaw, stressWeekRaw, spo2Raw, batteryRaw, activitiesRaw, profileRaw, v1Raw, weightRaw, goalRaw] = await Promise.all([
       this.get<Json>(`/usersummary-service/v2/dailysummaries?startDate=${date}&endDate=${date}`).catch(() => ({} as Json)),
