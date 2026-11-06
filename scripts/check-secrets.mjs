@@ -20,7 +20,7 @@ const SECRET_FILES = [
   '.token-cache.json', '.server.log',
 ];
 // 2) 会被提交的代码/配置里不能出现这些"值"（取自本地真实文件，只用于比对，不输出）
-const SENSITIVE_ENV_KEYS = ['GARMIN_API_KEY', 'AI_API_KEY', 'GARMIN_PASSWORD', 'GARMIN_USERNAME', 'SESSION_SECRET', 'DASHBOARD_PASSWORD'];
+const SENSITIVE_ENV_KEYS = ['GARMIN_API_KEY', 'AI_API_KEY', 'GARMIN_PASSWORD', 'GARMIN_USERNAME', 'SESSION_SECRET', 'DASHBOARD_PASSWORD', 'WEB_PUSH_PRIVATE_KEY'];
 const realValues = [];
 function collectFromEnv(file) {
   if (!existsSync(file)) return;

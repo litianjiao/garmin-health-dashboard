@@ -35,7 +35,7 @@ export default function App() {
   const [extraOpen, setExtraOpen] = useState(false);
   const [page, setPage] = useState<'dashboard' | 'training' | 'chat'>('dashboard');
   const [briefing, setBriefing] = useState<DailyBriefing | null>(null);
-  const [briefingOpen, setBriefingOpen] = useState(false);
+  const [briefingOpen, setBriefingOpen] = useState(() => new URLSearchParams(window.location.search).get('view') === 'briefing');
   const [briefingUnread, setBriefingUnread] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
   const [visible, setVisible] = useState<{ calories: boolean; heart: boolean; weight: boolean; battery: boolean; intensity: boolean; stress: boolean }>(() => {
@@ -74,11 +74,7 @@ export default function App() {
         const b: DailyBriefing | null = body.briefing ?? null;
         setBriefing(b);
         if (b) {
-          const isNew = knownFor !== null && knownFor !== b.forDate;
-          setBriefingUnread(true);
-          if (isNew && body.config?.browserNotify && 'Notification' in window && Notification.permission === 'granted') {
-            try { new Notification(`MORU · ${b.headline}`, { body: b.summary.slice(0, 120), tag: 'moru-briefing' }); } catch { /* 忽略 */ }
-          }
+          if (knownFor !== b.forDate) setBriefingUnread(true);
           knownFor = b.forDate;
         }
       } catch { /* 服务不可用时静默 */ }
@@ -88,9 +84,6 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
   const openBriefing = () => { setBriefingOpen(true); setBriefingUnread(false); };
-  const askNotificationPermission = () => {
-    if ('Notification' in window && Notification.permission === 'default') void Notification.requestPermission();
-  };
   const moveDate = (offset: number) => { const next = new Date(`${date}T12:00:00`); next.setDate(next.getDate() + offset); const today = new Date(); if (next.getFullYear() < today.getFullYear() || next.getFullYear() === today.getFullYear() && (next.getMonth() < today.getMonth() || next.getMonth() === today.getMonth() && next.getDate() <= today.getDate())) setDate(dateString(next)); };
   const exportData = async (kind: 'json' | 'csv' | 'summary') => {
     if (!data) return;
@@ -138,7 +131,7 @@ export default function App() {
     <div className="ambient ambient-one"/><div className="ambient ambient-two"/><div className="ambient ambient-three"/>
     <header className="topbar">
       <div className="greeting"><p>你好，</p><h1>{data?.profile.name || 'ZAX'}<span>.</span></h1><span>这是你今天的健康概况</span></div>
-      <div className="top-controls"><span className="date-display">{formatDate(date)}</span><div className="date-buttons"><button onClick={() => moveDate(-1)} aria-label="前一天"><ArrowLeft size={14}/></button><button onClick={() => moveDate(1)} aria-label="后一天"><ArrowRight size={14}/></button></div><button className={`icon-button ${loading ? 'spinning' : ''}`} onClick={() => load(true)} aria-label="刷新数据"><RefreshCw size={17}/></button><button className="icon-button notification" aria-label="每日简报" onClick={() => { askNotificationPermission(); openBriefing(); }}><Bell size={18}/>{briefingUnread && briefing && <i/>}</button><button className="avatar" onClick={() => setMenu(!menu)} aria-label="打开数据菜单">Z<span/></button></div>
+      <div className="top-controls"><span className="date-display">{formatDate(date)}</span><div className="date-buttons"><button onClick={() => moveDate(-1)} aria-label="前一天"><ArrowLeft size={14}/></button><button onClick={() => moveDate(1)} aria-label="后一天"><ArrowRight size={14}/></button></div><button className={`icon-button ${loading ? 'spinning' : ''}`} onClick={() => load(true)} aria-label="刷新数据"><RefreshCw size={17}/></button><button className="icon-button notification" aria-label="每日简报" onClick={openBriefing}><Bell size={18}/>{briefingUnread && briefing && <i/>}</button><button className="avatar" onClick={() => setMenu(!menu)} aria-label="打开数据菜单">Z<span/></button></div>
     </header>
     {menu && <div className="export-menu"><div><strong>健康数据</strong><button onClick={() => setMenu(false)} aria-label="关闭"><X size={16}/></button></div><button onClick={() => exportData('summary')}><Download size={15}/> 元宝健康摘要</button><button onClick={() => exportData('json')}><Download size={15}/> 导出 JSON</button><button onClick={() => exportData('csv')}><Download size={15}/> 导出 CSV</button></div>}
     {data?.source === 'demo' && <div className="demo-notice"><span/>演示数据 · 配置 Garmin 账号后显示你的真实数据 <button onClick={() => exportData('summary')}>导出摘要 <ArrowUpRight size={12}/></button></div>}

@@ -34,6 +34,9 @@ credentials.*
 # MCP / 会话缓存
 .garmin-session/
 .token-cache.json
+.moru-push/
+subscriptions.sqlite
+subscriptions.sqlite-*
 .field-samples.txt
 .swagger-found.json
 .swagger-component.js

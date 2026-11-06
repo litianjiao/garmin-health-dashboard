@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { PhonePushSettings } from './PhonePushSettings';
 import { Bell, BellOff, Check, Clock, LoaderCircle, Moon, RefreshCw, Settings2, Sparkles, Sun, X } from 'lucide-react';
 
 export interface BriefingInsight { label: string; text: string; tone: 'good' | 'warn' | 'neutral' }
@@ -103,8 +104,9 @@ export function BriefingPanel({ date, onClose }: { date: string; onClose: () => 
             {[6, 7, 8, 9, 10, 11, 12].map(h => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
           </select>
         </label>
+        <PhonePushSettings/>
         <div className="briefing-setting-note">
-          <p>推送方式：生成后会发送 <b>Windows 桌面通知</b>；网页打开时顶部会显示简报横幅，铃铛出现红点。浏览器系统通知需在浏览器设置里允许本站通知权限。</p>
+          <p>网页打开时仍会显示简报横幅；Windows 桌面提醒是另一条通道，不是手机后台推送。</p>
           <p>每天仅调用一次 AI（使用「模型管理」里选中的模型），结果保存在本机。AI 不可用时自动降级为本地规则简报，保证有内容。</p>
         </div>
         <button className="briefing-generate-btn" onClick={generate} disabled={generating}><RefreshCw size={14}/> 用当前设置立即生成一份</button>

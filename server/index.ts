@@ -15,8 +15,9 @@ import { PmcService } from './pmc';
 import { registerAiRouter } from './ai';
 import { registerAiModelRouter } from './aiModels';
 import { registerMetricsRouter, loadLocalEntries } from './localMetrics';
-import { registerBriefingRouter, startBriefingScheduler, type BriefingDataFetcher, type DailyBriefing } from './briefing';
+import { phoneBriefingDate, registerBriefingRouter, startBriefingScheduler, type BriefingDataFetcher, type DailyBriefing } from './briefing';
 import { execFile } from 'node:child_process';
+import { openPhonePush, registerPushRouter, startPhonePush } from './phonePush';
 
 const app = express();
 const port = Number(process.env.PORT || 8787);
@@ -42,12 +43,11 @@ registerAiModelRouter(app);
 registerMetricsRouter(app);
 
 // 每日简报的数据获取器：复用缓存，避免重复调用 Garmin API
-const briefingFetcher: BriefingDataFetcher = async () => {
-  const d = new Date(); d.setDate(d.getDate() - 1);
-  const p = (n: number) => String(n).padStart(2, '0');
-  const date = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+const briefingFetcher: BriefingDataFetcher = async (date) => {
   const locals = await loadLocalEntries();
-  const day = configured && !useMcp ? await official.dashboard(date, locals) : demoData(date);
+  if (!configured) return { day: demoData(date), trends: null, pmcRows: null };
+  if (useMcp) return { day: await garmin.dashboard(date), trends: null, pmcRows: null };
+  const day = await official.dashboard(date, locals);
   let trends = null;
   try { trends = await official.extended(date, 7); } catch { /* 趋势不可用时简报仍可生成 */ }
   let pmcRows = null;
@@ -64,6 +64,8 @@ function desktopNotify(b: DailyBriefing) {
   execFile('powershell.exe', ['-NoProfile', '-WindowStyle', 'Hidden', '-Command', balloon], { windowsHide: true }, () => undefined);
 }
 startBriefingScheduler(briefingFetcher, desktopNotify);
+const phonePush = await openPhonePush(process.env);
+startPhonePush(phonePush, phoneBriefingDate);
 
 function signature(value: string) { return createHmac('sha256', secret).update(value).digest('base64url'); }
 function safeEqual(a: string, b: string) { const aa = Buffer.from(a); const bb = Buffer.from(b); return aa.length === bb.length && timingSafeEqual(aa, bb); }
@@ -115,6 +117,7 @@ app.get('/api/trends', async (req, res) => {
     res.status(503).json({ error: message || '暂时无法获取趋势数据。' });
   }
 });
+registerPushRouter(app, phonePush);
 app.get('/api/pmc', async (req, res) => {
   const requested = typeof req.query.date === 'string' ? req.query.date : new Date().toISOString().slice(0, 10);
   const days = [42, 91, 182].includes(Number(req.query.days)) ? Number(req.query.days) : 91;
@@ -167,6 +170,6 @@ if (process.env.NODE_ENV === 'production') {
 }
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 const server = app.listen(port, host, () => console.log(`MORU dashboard: http://${host}:${port} (${configured ? 'Garmin' : 'demo'} mode)`));
-async function shutdown() { server.close(); await garmin.close(); process.exit(0); }
+async function shutdown() { server.close(); await garmin.close(); phonePush?.close(); process.exit(0); }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);

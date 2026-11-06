@@ -195,6 +195,18 @@ docker compose up -d --build
 
 仅绑定 `127.0.0.1:8787`，前面仍需 HTTPS 反向代理/Tunnel，不能直接把无 TLS 的端口暴露到公网。
 
+### Mac mini 常驻，手机关页也能收简报（可选）
+
+手机只运行一个可装到主屏的 Web App。Mac mini 负责获取 Garmin 数据、生成简报、向浏览器的推送服务发送通知；手机不需要 Garmin / AI 密钥，通知正文不含健康指标。
+
+1. 使用 Node.js 22.13+，在项目目录运行 `npm ci && npm run build`。用 `npx --no-install web-push generate-vapid-keys` 在本机生成一对 VAPID 密钥并妥善保存。不要把终端截图、真实 `.env` 或订阅库发到 GitHub。
+2. 在服务端 `.env` 填 `WEB_PUSH_PUBLIC_KEY`、`WEB_PUSH_PRIVATE_KEY`、`WEB_PUSH_SUBJECT`（例如自己真实可联系的 `mailto:` 地址）。设置强 `DASHBOARD_PASSWORD` 和独立随机 `SESSION_SECRET`、`SECURE_COOKIES=true`，保持 `HOST=127.0.0.1`。推送订阅存在本机 `.moru-push/`，可用 `WEB_PUSH_DIR` 指向私有持久目录。
+3. 用 `npm start` 启动。需要开机/登录后自动运行，可用用户自己的 launchd 服务，并将工作目录设为项目目录。使用自己已有的稳定 HTTPS 域名 / 隧道转到回环地址（见上文），不要开放无密码端口。主机必须保持唤醒、联网；设置好本机时区，生成时间以服务端为准。
+4. Android 用支持 Push API 的系统浏览器；iOS/iPadOS 16.4+ 用 Safari「添加到主屏幕」，从主屏图标打开。登录 → 铃铛 → 推送设置 →「订阅本设备」，由本人点击授予通知权限，再发测试通知。在手机通知中心确认；返回「已受理」不等于手机已显示。内置浏览器、系统通知权限、网络和推送服务可达性均影响送达。
+5. 验收：关掉仪表盘页面。Mac 在已生成今天面向昨天真实数据的简报后，每 5 分钟检查一次，向已订阅设备发送通用就绪提示；点开回到本域的简报，未登录要先登录。过期订阅（404/410）清理，临时发送失败在当天后续检查重试。没有有效读数或只有演示数据时不发每日提醒。取消订阅后不再发送。
+
+参考：[Push API](https://developer.mozilla.org/en-US/docs/Web/API/Push_API)、[WebKit：iOS 主屏 Web App 推送](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)。
+
 ## 4. 每日健康简报（定时推送）
 
 参考 Whoop / Oura 的「每日 readiness 简报」，每天 **10:00 左右**基于**前一天完整数据**生成一份个人健康/健身洞察：
@@ -241,7 +253,7 @@ git commit -m "..."         # 钩子会再次自动扫描
 - 主数据源：**Garmin 官方 Personal API**（`personal.connectapi.garmin.com`，ApiKey 换 token）；备用通道：`@modelcontextprotocol/sdk` stdio 调用 `epodivilov/garmin-connect-mcp`
 - AI 对话：任意 OpenAI 兼容端点（本地 WorkBuddy2API / DeepSeek 等），凭据仅在服务端 `.env`
 - 只读取 Garmin 数据，不调用写入/删除工具；不上传凭据到第三方字体、分析或广告服务
-- 网络目标仅：Garmin 官方 API、你配置的 AI 端点；字体与图标均为本地资源
+- 默认仅连接 Garmin 官方 API 和你配置的 AI 端点。启用手机推送后还会连接订阅设备的浏览器推送服务；字体与图标均为本地资源。
 - Cookie 会话是 HMAC 签名、7 天过期；`SECURE_COOKIES=true` 时仅 HTTPS 发送
 
 本项目不是医疗设备或诊断工具。第三方 Garmin API 行为可能变化，数据仅供个人健康趋势参考。
