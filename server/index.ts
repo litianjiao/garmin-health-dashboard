@@ -30,7 +30,19 @@ const garmin = new GarminMcp();
 const useMcp = process.env.GARMIN_TRANSPORT === 'mcp';
 const configured = official.configured || Boolean(process.env.GARMIN_USERNAME && process.env.GARMIN_PASSWORD);
 const password = process.env.DASHBOARD_PASSWORD || '';
-const secret = process.env.SESSION_SECRET || 'local-only-moru-session';
+const sessionSecret = (process.env.SESSION_SECRET || '').trim();
+// 安全基线（见 SECURITY.md / 2026-11-06 鉴权审阅）：
+// 1) 启用密码但缺少独立签名密钥时拒绝启动，绝不使用可猜测的源码默认值；
+// 2) 无密码模式只允许绑定回环地址，避免无鉴权服务直接暴露到网络。
+if (password && !sessionSecret) {
+  console.error('[security] 已设置 DASHBOARD_PASSWORD 但未设置 SESSION_SECRET，拒绝启动。请在 .env 配置独立随机密钥。');
+  process.exit(1);
+}
+if (!password && !['127.0.0.1', 'localhost', '::1'].includes(host)) {
+  console.error('[security] 未设置 DASHBOARD_PASSWORD 时服务只能绑定回环地址；请设置密码或把 HOST 改为 127.0.0.1。');
+  process.exit(1);
+}
+const secret = sessionSecret || 'local-only-no-auth-session';
 const CACHE_TTL_MS = 600_000; // 10 分钟缓存，与 APK 行为一致；仅手动刷新才强制重新获取
 const cache = new Map<string, { time: number; data: unknown }>();
 app.use(helmet({ contentSecurityPolicy: { directives: { defaultSrc: ["'self'"], styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", 'data:'], connectSrc: ["'self'"] } } }));
@@ -38,6 +50,33 @@ app.use(compression());
 app.use(express.json({ limit: '256kb' }));
 app.use(cookieParser());
 app.disable('x-powered-by');
+
+// ===== 会话鉴权（必须注册在所有业务路由之前）=====
+// Express 按注册顺序匹配；此前 AI/模型/手动指标/简报路由先注册导致绕过鉴权。
+function signature(value: string) { return createHmac('sha256', secret).update(value).digest('base64url'); }
+function safeEqual(a: string, b: string) { const aa = Buffer.from(a); const bb = Buffer.from(b); return aa.length === bb.length && timingSafeEqual(aa, bb); }
+function validSession(value?: string) {
+  if (!password) return true;
+  if (!value) return false;
+  const [expires, sig] = value.split('.');
+  return Boolean(expires && Number(expires) > Date.now() && sig && safeEqual(signature(expires), sig));
+}
+// 仅公开会话创建与清除；其余 /api 一律要求有效会话
+app.use('/api', (req, res, next) => {
+  if ((req.path === '/session' && (req.method === 'POST' || req.method === 'DELETE')) || validSession(req.cookies.moru_session)) return next();
+  res.status(401).json({ error: '请先登录', authRequired: true });
+});
+app.post('/api/session', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: 'draft-8' }), (req, res) => {
+  if (!password) return res.json({ authenticated: true });
+  const supplied = typeof req.body?.password === 'string' ? req.body.password : '';
+  if (!safeEqual(supplied, password)) return res.status(401).json({ error: '密码不正确' });
+  const expires = String(Date.now() + 7 * 86400_000);
+  res.cookie('moru_session', `${expires}.${signature(expires)}`, { httpOnly: true, sameSite: 'strict', secure: process.env.SECURE_COOKIES === 'true', maxAge: 7 * 86400_000, path: '/' });
+  res.json({ authenticated: true });
+});
+app.delete('/api/session', (_req, res) => { res.clearCookie('moru_session', { path: '/' }); res.json({ authenticated: false }); });
+
+// ===== 以下全部为受保护的业务路由 =====
 registerAiRouter(app, cache);
 registerAiModelRouter(app);
 registerMetricsRouter(app);
@@ -67,33 +106,9 @@ startBriefingScheduler(briefingFetcher, desktopNotify);
 const phonePush = await openPhonePush(process.env);
 startPhonePush(phonePush, phoneBriefingDate);
 
-function signature(value: string) { return createHmac('sha256', secret).update(value).digest('base64url'); }
-function safeEqual(a: string, b: string) { const aa = Buffer.from(a); const bb = Buffer.from(b); return aa.length === bb.length && timingSafeEqual(aa, bb); }
-function validSession(value?: string) {
-  if (!password) return true;
-  if (!value) return false;
-  const [expires, sig] = value.split('.');
-  return Boolean(expires && Number(expires) > Date.now() && sig && safeEqual(signature(expires), sig));
-}
-app.use('/api', (req, res, next) => {
-  if (req.path === '/session' || validSession(req.cookies.moru_session)) return next();
-  res.status(401).json({ error: '请先登录', authRequired: true });
-});
-app.post('/api/session', rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: 'draft-8' }), (req, res) => {
-  if (!password) return res.json({ authenticated: true });
-  const supplied = typeof req.body?.password === 'string' ? req.body.password : '';
-  if (!safeEqual(supplied, password)) return res.status(401).json({ error: '密码不正确' });
-  const expires = String(Date.now() + 7 * 86400_000);
-  res.cookie('moru_session', `${expires}.${signature(expires)}`, { httpOnly: true, sameSite: 'strict', secure: process.env.SECURE_COOKIES === 'true', maxAge: 7 * 86400_000, path: '/' });
-  res.json({ authenticated: true });
-});
-app.delete('/api/session', (_req, res) => { res.clearCookie('moru_session', { path: '/' }); res.json({ authenticated: false }); });
 const historyAccount = useMcp
   ? (process.env.GARMIN_USERNAME && process.env.GARMIN_PASSWORD ? `mcp:${process.env.GARMIN_USERNAME.trim().toLowerCase()}` : null)
   : (official.configured ? `official:${process.env.GARMIN_API_KEY!.trim()}` : null);
-if (historyDir && ((!password && !['localhost','127.0.0.1','::1'].includes(host)) || (password && !process.env.SESSION_SECRET?.trim()))) {
-  throw new Error('网络模式下启用本地历史需同时设置 DASHBOARD_PASSWORD 和 SESSION_SECRET');
-}
 const history = await openHealthHistory(historyDir, historyAccount);
 let historyWarning: string | undefined;
 registerHistoryRouter(app, history, Boolean(historyDir), official.configured && !useMcp ? date => official.personalHistory(date) : null, () => historyWarning);
