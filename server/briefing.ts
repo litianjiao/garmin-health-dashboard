@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import type express from 'express';
 import type { DashboardData, DashboardExtended } from '../src/types';
 import { makeSummary } from '../src/summary';
-import { currentAiModel } from './aiModels';
 import { garminDayToolData, garminTrendsToolData } from '../src/aiTools';
 
 // ===== 数据结构 =====
@@ -28,6 +27,7 @@ interface BriefingConfig {
   enabled: boolean;
   hour: number;              // 生成时间（本地小时），默认 10
   browserNotify: boolean;
+  model: string;             // 简报专用模型（独立于 AI 对话模型）
 }
 interface BriefingStore {
   config: BriefingConfig;
@@ -35,7 +35,11 @@ interface BriefingStore {
 }
 
 const STORE_FILE = join(process.cwd(), '.briefings.json');
-const DEFAULT_CONFIG: BriefingConfig = { enabled: true, hour: 10, browserNotify: true };
+// 简报需要稳定输出结构化 JSON；部分对话模型（如 hy4std/hy4free）会卡住，
+// 因此默认用已验证可稳定生成简报的模型，并允许在推送设置里更改。
+const DEFAULT_BRIEFING_MODEL = 'cn:glm-5.3-flash';
+const FALLBACK_BRIEFING_MODEL = 'cn:deepseek-v4.1-flash';
+const DEFAULT_CONFIG: BriefingConfig = { enabled: true, hour: 10, browserNotify: true, model: DEFAULT_BRIEFING_MODEL };
 const MAX_HISTORY = 14;
 
 let storeCache: BriefingStore | null = null;
@@ -99,11 +103,7 @@ function rulesBriefing(d: DashboardData, t: DashboardExtended | null, pmc: { ctl
 }
 
 // ===== AI 简报 =====
-async function aiBriefing(d: DashboardData, t: DashboardExtended | null, pmc: ReturnType<typeof pmcLatest>, date: string): Promise<DailyBriefing> {
-  const baseUrl = String(process.env.AI_BASE_URL || '').replace(/\/+$/, '');
-  const apiKey = process.env.AI_API_KEY || '';
-  if (!baseUrl || !apiKey) throw new Error('AI 未配置');
-  const model = await currentAiModel();
+async function aiBriefingOnce(d: DashboardData, t: DashboardExtended | null, pmc: ReturnType<typeof pmcLatest>, date: string, model: string, baseUrl: string, apiKey: string): Promise<DailyBriefing> {
   const summary = makeSummary(d, pmc);
   const trendDigest = t ? `近 ${t.range} 天均值：睡眠 ${t.averages.sleepHours ?? '—'} 小时、步数 ${t.averages.steps ?? '—'}、HRV ${t.averages.hrv ?? '—'} ms、压力 ${t.averages.stress ?? '—'}、静息心率 ${t.averages.restingHeartRate ?? '—'} bpm。` : '';
 
@@ -116,7 +116,7 @@ async function aiBriefing(d: DashboardData, t: DashboardExtended | null, pmc: Re
   const res = await fetch(`${baseUrl}/chat/completions`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model, messages: [{ role: 'system', content: system }, { role: 'user', content: user }], temperature: 0.7 }),
-    signal: AbortSignal.timeout(90_000),
+    signal: AbortSignal.timeout(60_000),
   });
   if (!res.ok) throw new Error(`AI 返回 ${res.status}`);
   const j = await res.json();
@@ -135,6 +135,20 @@ async function aiBriefing(d: DashboardData, t: DashboardExtended | null, pmc: Re
     recoveryAdvice: String(parsed.recoveryAdvice || ''),
     attention: String(parsed.attention || '数据仅供参考，不作医疗诊断。'),
   };
+}
+
+// 简报专用模型：主模型失败/超时后用已验证稳定的备用模型重试一次。
+async function aiBriefing(d: DashboardData, t: DashboardExtended | null, pmc: ReturnType<typeof pmcLatest>, date: string, preferredModel: string): Promise<DailyBriefing> {
+  const baseUrl = String(process.env.AI_BASE_URL || '').replace(/\/+$/, '');
+  const apiKey = process.env.AI_API_KEY || '';
+  if (!baseUrl || !apiKey) throw new Error('AI 未配置');
+  const candidates = [preferredModel, FALLBACK_BRIEFING_MODEL].filter((m, i, arr) => m && arr.indexOf(m) === i);
+  let lastError = '';
+  for (const model of candidates) {
+    try { return await aiBriefingOnce(d, t, pmc, date, model, baseUrl, apiKey); }
+    catch (e) { lastError = `${model}: ${e instanceof Error ? e.message : '未知错误'}`; }
+  }
+  throw new Error(`全部简报模型失败（${lastError}）`);
 }
 
 function pmcLatest(pmcRows: Array<{ date: string; ctl: number; atl: number; tsb: number }> | null) {
@@ -170,7 +184,7 @@ export async function generateBriefing(date: string, fetcher: BriefingDataFetche
 
   let briefing: DailyBriefing;
   try {
-    briefing = await aiBriefing(day, trends, pmc, date);
+    briefing = await aiBriefing(day, trends, pmc, date, store.config.model || DEFAULT_BRIEFING_MODEL);
   } catch (e) {
     briefing = rulesBriefing(day, trends, pmc, date);
     briefing.error = `AI 生成失败，已用本地规则简报：${e instanceof Error ? e.message : '未知错误'}`;
@@ -219,6 +233,7 @@ export function registerBriefingRouter(app: express.Express, fetcher: BriefingDa
     if (typeof b.enabled === 'boolean') store.config.enabled = b.enabled;
     if (typeof b.hour === 'number') store.config.hour = Math.max(0, Math.min(23, Math.round(b.hour)));
     if (typeof b.browserNotify === 'boolean') store.config.browserNotify = b.browserNotify;
+    if (typeof b.model === 'string' && b.model.trim()) store.config.model = b.model.trim().slice(0, 80);
     await writeStore(store);
     res.json({ ok: true, config: store.config });
   });

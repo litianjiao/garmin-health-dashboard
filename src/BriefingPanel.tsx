@@ -8,7 +8,7 @@ export interface DailyBriefing {
   headline: string; summary: string; insights: BriefingInsight[];
   trainingAdvice: string; recoveryAdvice: string; attention: string; error?: string;
 }
-interface Config { enabled: boolean; hour: number; browserNotify: boolean }
+interface Config { enabled: boolean; hour: number; browserNotify: boolean; model: string }
 
 const fmtDate = (s: string) => {
   const d = new Date(`${s}T12:00:00`);
@@ -18,7 +18,8 @@ const fmtDate = (s: string) => {
 export function BriefingPanel({ date, onClose }: { date: string; onClose: () => void }) {
   const [briefing, setBriefing] = useState<DailyBriefing | null>(null);
   const [history, setHistory] = useState<DailyBriefing[]>([]);
-  const [config, setConfig] = useState<Config>({ enabled: true, hour: 10, browserNotify: true });
+  const [config, setConfig] = useState<Config>({ enabled: true, hour: 10, browserNotify: true, model: 'cn:glm-5.3-flash' });
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [error, setError] = useState('');
@@ -28,13 +29,15 @@ export function BriefingPanel({ date, onClose }: { date: string; onClose: () => 
   const load = async () => {
     setLoading(true);
     try {
-      const [a, b] = await Promise.all([
+      const [a, b, m] = await Promise.all([
         fetch('/api/briefing/today').then(r => r.json()),
         fetch('/api/briefing/history').then(r => r.json()),
+        fetch('/api/ai/models').then(r => r.json()).catch(() => ({ models: [] })),
       ]);
       setBriefing(a.briefing ?? null);
       setHistory(b.history ?? []);
       if (a.config) setConfig(a.config);
+      setAvailableModels((m.models || []).map((x: { id: string }) => x.id));
     } catch { setError('加载简报失败'); }
     finally { setLoading(false); }
   };
@@ -104,10 +107,17 @@ export function BriefingPanel({ date, onClose }: { date: string; onClose: () => 
             {[6, 7, 8, 9, 10, 11, 12].map(h => <option key={h} value={h}>{String(h).padStart(2, '0')}:00</option>)}
           </select>
         </label>
+        <label className="briefing-setting-row">
+          <div><b><Settings2 size={14}/> 简报专用模型</b><span>独立于「AI 对话」的模型；部分模型不擅长结构化输出会卡住，默认模型已验证稳定。失败时自动用备用模型重试一次</span></div>
+          <select value={config.model} onChange={e => saveConfig({ ...config, model: e.target.value })}>
+            {availableModels.length === 0 && <option value={config.model}>{config.model}</option>}
+            {availableModels.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </label>
         <PhonePushSettings/>
         <div className="briefing-setting-note">
           <p>网页打开时仍会显示简报横幅；Windows 桌面提醒是另一条通道，不是手机后台推送。</p>
-          <p>每天仅调用一次 AI（使用「模型管理」里选中的模型），结果保存在本机。AI 不可用时自动降级为本地规则简报，保证有内容。</p>
+          <p>每天仅调用一次 AI（使用上方「简报专用模型」，与 AI 对话模型相互独立），结果保存在本机。AI 全部失败时自动降级为本地规则简报，保证有内容。</p>
         </div>
         <button className="briefing-generate-btn" onClick={generate} disabled={generating}><RefreshCw size={14}/> 用当前设置立即生成一份</button>
       </div>}
