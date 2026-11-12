@@ -10,7 +10,7 @@
     "dev": "concurrently -n api,web -c cyan,magenta \"tsx watch server/index.ts\" \"vite\"",
     "build": "tsc --noEmit && vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
-    "test": "tsx --test server/*.test.ts",
+    "test": "tsx --test --test-concurrency=1 server/*.test.ts",
     "check:secrets": "node scripts/check-secrets.mjs",
     "prepare": "node scripts/install-hooks.mjs"
   },

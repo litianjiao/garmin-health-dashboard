@@ -22,6 +22,8 @@ export interface DailyBriefing {
   recoveryAdvice: string;
   attention: string;
   error?: string;
+  notifiedAt?: string;          // 桌面/手机推送已发出的时间（未推送=undefined）
+  manual?: boolean;             // 是否由「立即生成」手动触发（手动生成不立即推送）
 }
 interface BriefingConfig {
   enabled: boolean;
@@ -34,7 +36,9 @@ interface BriefingStore {
   history: DailyBriefing[];  // 最近 14 天
 }
 
-const STORE_FILE = join(process.cwd(), '.briefings.json');
+const STORE_BASENAME = '.briefings.json';
+// 运行时按当前 cwd 定位（测试会 chdir 到临时目录做隔离，不能用模块加载期常量）
+const storePath = () => join(process.cwd(), STORE_BASENAME);
 // 简报需要稳定输出结构化 JSON；部分对话模型（如 hy4std/hy4free）会卡住，
 // 因此默认用已验证可稳定生成简报的模型，并允许在推送设置里更改。
 const DEFAULT_BRIEFING_MODEL = 'cn:glm-5.3-flash';
@@ -43,20 +47,25 @@ const DEFAULT_CONFIG: BriefingConfig = { enabled: true, hour: 10, browserNotify:
 const MAX_HISTORY = 14;
 
 let storeCache: BriefingStore | null = null;
+let storeCacheCwd = '';
 async function readStore(): Promise<BriefingStore> {
-  if (storeCache) return storeCache;
+  const cwd = process.cwd();
+  // cwd 变化（测试隔离/多实例）时让缓存失效，避免读到另一个目录的简报
+  if (storeCache && storeCacheCwd === cwd) return storeCache;
   try {
-    const p = JSON.parse(await readFile(STORE_FILE, 'utf8'));
+    const p = JSON.parse(await readFile(storePath(), 'utf8'));
     storeCache = {
       config: { ...DEFAULT_CONFIG, ...(p.config || {}) },
       history: Array.isArray(p.history) ? p.history : [],
     };
   } catch { storeCache = { config: { ...DEFAULT_CONFIG }, history: [] }; }
+  storeCacheCwd = cwd;
   return storeCache!;
 }
 async function writeStore(s: BriefingStore) {
   storeCache = s;
-  await writeFile(STORE_FILE, JSON.stringify(s, null, 2)).catch(() => undefined);
+  storeCacheCwd = process.cwd();
+  await writeFile(storePath(), JSON.stringify(s, null, 2)).catch(() => undefined);
 }
 
 const dateStr = (d: Date) => {
@@ -167,7 +176,7 @@ export type BriefingDataFetcher = (date: string) => Promise<{
 
 let lastGeneratedFor: string | null = null;
 
-export async function generateBriefing(date: string, fetcher: BriefingDataFetcher, force = false): Promise<DailyBriefing> {
+export async function generateBriefing(date: string, fetcher: BriefingDataFetcher, force = false, manual = false): Promise<DailyBriefing> {
   const store = await readStore();
   const existing = store.history.find(b => b.forDate === today() && b.date === date);
   if (existing && !force) return existing;
@@ -191,6 +200,10 @@ export async function generateBriefing(date: string, fetcher: BriefingDataFetche
   }
 
   briefing.dataSource = day.source;
+  briefing.manual = manual;
+  // 重新生成会替换旧记录；若旧记录已推送过则不重复推送
+  const prev = store.history.find(b => b.forDate === briefing.forDate && b.date === briefing.date);
+  if (prev?.notifiedAt) briefing.notifiedAt = prev.notifiedAt;
   store.history = [briefing, ...store.history.filter(b => !(b.forDate === briefing.forDate && b.date === briefing.date))].slice(0, MAX_HISTORY);
   await writeStore(store);
   lastGeneratedFor = briefing.forDate;
@@ -221,7 +234,7 @@ export function registerBriefingRouter(app: express.Express, fetcher: BriefingDa
   app.post('/api/briefing/generate', async (req, res) => {
     const date = typeof req.body?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.date) ? req.body.date : yesterday();
     try {
-      const b = await generateBriefing(date, fetcher, true);
+      const b = await generateBriefing(date, fetcher, true, true);
       res.json({ ok: true, briefing: b });
     } catch (e) { res.status(503).json({ error: e instanceof Error ? e.message : '生成失败' }); }
   });
@@ -245,6 +258,15 @@ export function registerBriefingRouter(app: express.Express, fetcher: BriefingDa
   });
 }
 
+// 把某条简报标记为已推送（持久化，避免重复通知）
+export async function markBriefingNotified(date: string, forDate: string): Promise<void> {
+  const store = await readStore();
+  const b = store.history.find(x => x.date === date && x.forDate === forDate);
+  if (!b || b.notifiedAt) return;
+  b.notifiedAt = new Date().toISOString();
+  await writeStore(store);
+}
+
 // ===== 定时调度 =====
 export function startBriefingScheduler(fetcher: BriefingDataFetcher, notify: (b: DailyBriefing) => void) {
   let running = false;
@@ -255,20 +277,30 @@ export function startBriefingScheduler(fetcher: BriefingDataFetcher, notify: (b:
     const now = new Date();
     const targetDate = yesterday();
     const todayKey = today();
-    if (store.history.some(b => b.forDate === todayKey && b.date === targetDate)) return;
-    // 到达设定小时之后（或服务启动后的补生成）才执行
+    // 到达设定小时之后才处理（服务启动后的补生成也遵守此门槛）
     if (now.getHours() < store.config.hour) return;
+    const existing = store.history.find(b => b.forDate === todayKey && b.date === targetDate);
     running = true;
     try {
-      const b = await generateBriefing(targetDate, fetcher);
-      console.log(`[briefing] generated for ${b.forDate} (${reason}, source=${b.source})`);
+      let b: DailyBriefing;
+      if (existing) {
+        // 已有简报（可能是手动「立即生成」产生的）：不重复生成，但到点后必须补发推送。
+        if (existing.notifiedAt) return;
+        if (!existing.dataSource || existing.dataSource !== 'garmin') return;
+        b = existing;
+        console.log(`[briefing] existing briefing for ${todayKey} not yet notified, sending (${reason})`);
+      } else {
+        b = await generateBriefing(targetDate, fetcher);
+        console.log(`[briefing] generated for ${b.forDate} (${reason}, source=${b.source})`);
+      }
       notify(b);
+      await markBriefingNotified(b.date, b.forDate);
     } catch (e) {
       console.error('[briefing] generation failed:', e instanceof Error ? e.message : e);
     } finally { running = false; }
   };
 
-  // 启动 5 秒后补生成；之后每 5 分钟检查一次
+  // 启动 5 秒后检查；之后每 5 分钟检查一次（到点且未推送时会补发）
   setTimeout(() => { void maybeGenerate('startup catch-up'); }, 5000);
   const timer = setInterval(() => { void maybeGenerate('scheduled'); }, 300_000);
   timer.unref?.();

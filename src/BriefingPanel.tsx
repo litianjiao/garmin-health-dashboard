@@ -7,6 +7,7 @@ export interface DailyBriefing {
   date: string; forDate: string; generatedAt: string; source: 'ai' | 'rules'; model: string | null;
   headline: string; summary: string; insights: BriefingInsight[];
   trainingAdvice: string; recoveryAdvice: string; attention: string; error?: string;
+  notifiedAt?: string; manual?: boolean; dataSource?: string;
 }
 interface Config { enabled: boolean; hour: number; browserNotify: boolean; model: string }
 
@@ -137,6 +138,7 @@ function BriefingBody({ b, history, onSelect }: { b: DailyBriefing; history: Dai
       <p>{b.summary}</p>
       <div className="briefing-meta">
         <span>{b.source === 'ai' ? `AI · ${b.model || '模型'}` : '本地规则生成'}</span>
+        <span>{b.notifiedAt ? `已推送 ${new Date(b.notifiedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : b.manual ? '手动生成 · 到点自动补推送' : '待推送'}</span>
         <span>{new Date(b.generatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
       </div>
     </div>
